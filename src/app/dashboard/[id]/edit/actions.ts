@@ -6,7 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { subscriptionSchema } from "@/lib/schemas";
 
-export async function createSubscription(formData: FormData) {
+export async function updateSubscription(id: string, formData: FormData) {
   const session = await auth();
   if (!session?.user?.id) {
     throw new Error("Unauthorized");
@@ -14,11 +14,9 @@ export async function createSubscription(formData: FormData) {
 
   const parsed = subscriptionSchema.parse(Object.fromEntries(formData));
 
-  await prisma.subscription.create({
-    data: {
-      ...parsed,
-      userId: session.user.id,
-    },
+  await prisma.subscription.updateMany({
+    where: { id, userId: session.user.id },
+    data: parsed,
   });
 
   revalidatePath("/dashboard");

@@ -71,15 +71,23 @@ export default async function DashboardPage() {
                     {sub.nextBillingDate.toLocaleDateString()}
                   </span>
                 </div>
-                <form action={deleteSubscription}>
-                  <input type="hidden" name="id" value={sub.id} />
-                  <button
-                    type="submit"
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/dashboard/${sub.id}/edit`}
                     className="rounded-full border border-solid border-black/[.08] px-3 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
                   >
-                    Delete
-                  </button>
-                </form>
+                    Edit
+                  </Link>
+                  <form action={deleteSubscription}>
+                    <input type="hidden" name="id" value={sub.id} />
+                    <button
+                      type="submit"
+                      className="rounded-full border border-solid border-black/[.08] px-3 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </div>
               </li>
             ))}
           </ul>
