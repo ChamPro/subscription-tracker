@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { calculateMonthlyTotal } from "@/lib/subscription-utils";
 import { deleteSubscription } from "./actions";
 
 export default async function DashboardPage() {
@@ -15,6 +16,9 @@ export default async function DashboardPage() {
     where: { userId: session.user.id, status: "ACTIVE" },
     orderBy: { nextBillingDate: "asc" },
   });
+
+  const monthlyTotals = calculateMonthlyTotal(subscriptions);
+  const totalEntries = Object.entries(monthlyTotals);
 
   return (
     <div className="flex flex-1 flex-col items-center bg-zinc-50 py-12 dark:bg-black">
@@ -37,6 +41,28 @@ export default async function DashboardPage() {
             </button>
           </form>
         </header>
+
+        <div className="mb-8 rounded-lg border border-black/[.08] bg-white px-5 py-4 dark:border-white/[.145] dark:bg-[#0a0a0a]">
+          <h2 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+            Monthly Total
+          </h2>
+          {totalEntries.length === 0 ? (
+            <p className="text-zinc-500 dark:text-zinc-400">
+              No active subscriptions
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {totalEntries.map(([currency, total]) => (
+                <p
+                  key={currency}
+                  className="text-2xl font-semibold text-black dark:text-zinc-50"
+                >
+                  ${total.toFixed(2)} {currency}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-lg font-medium text-black dark:text-zinc-50">
