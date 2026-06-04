@@ -2,13 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { calculateMonthlyTotal } from "@/lib/subscription-utils";
+import { getCachedMonthlyTotal } from "@/lib/queries";
 import { deleteSubscription } from "./actions";
 
 export default async function DashboardPage() {
   const session = await auth();
 
-  if (!session?.user) {
+  if (!session?.user?.id) {
     redirect("/login");
   }
 
@@ -17,7 +17,7 @@ export default async function DashboardPage() {
     orderBy: { nextBillingDate: "asc" },
   });
 
-  const monthlyTotals = calculateMonthlyTotal(subscriptions);
+  const monthlyTotals = await getCachedMonthlyTotal(session.user.id);
   const totalEntries = Object.entries(monthlyTotals);
 
   return (
