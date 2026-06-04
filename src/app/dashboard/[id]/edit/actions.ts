@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { subscriptionSchema } from "@/lib/schemas";
-import { redis, monthlyTotalKey } from '@/lib/redis';
+import { invalidateUserCache } from '@/lib/redis';
 
 export async function updateSubscription(id: string, formData: FormData) {
   const session = await auth();
@@ -20,11 +20,7 @@ export async function updateSubscription(id: string, formData: FormData) {
     data: parsed,
   });
   
-  try {
-    await redis.del(monthlyTotalKey(session.user.id));
-  } catch (e) {
-    console.error('Redis del failed:', e);
-  }
+  await invalidateUserCache(session.user.id);
 
   revalidatePath("/dashboard");
   redirect("/dashboard");

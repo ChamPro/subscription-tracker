@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { getCachedMonthlyTotal } from "@/lib/queries";
+import { getCachedMonthlyTotal, getCachedSubscriptions } from "@/lib/queries";
 import { deleteSubscription } from "./actions";
 
 export default async function DashboardPage() {
@@ -12,10 +11,7 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const subscriptions = await prisma.subscription.findMany({
-    where: { userId: session.user.id, status: "ACTIVE" },
-    orderBy: { nextBillingDate: "asc" },
-  });
+  const subscriptions = await getCachedSubscriptions(session.user.id);
 
   const monthlyTotals = await getCachedMonthlyTotal(session.user.id);
   const totalEntries = Object.entries(monthlyTotals);
@@ -94,7 +90,7 @@ export default async function DashboardPage() {
                   <span className="text-sm text-zinc-600 dark:text-zinc-400">
                     {sub.amount.toFixed(2)} {sub.currency} ·{" "}
                     {sub.billingCycle.toLowerCase()} · next{" "}
-                    {sub.nextBillingDate.toLocaleDateString()}
+                    {new Date(sub.nextBillingDate).toLocaleDateString()}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">

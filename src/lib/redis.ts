@@ -5,3 +5,14 @@ export const redis = Redis.fromEnv();
 
 export const monthlyTotalKey = (userId: string) =>
   `user:${userId}:monthly-total`;
+
+export const subscriptionsKey = (userId: string) =>
+  `user:${userId}:subscriptions`;
+
+export async function invalidateUserCache(userId: string) {
+  try {
+    await redis.del(monthlyTotalKey(userId), subscriptionsKey(userId));
+  } catch (e) {
+    console.error("Cache invalidation failed:", e);
+  }
+}
