@@ -1,10 +1,12 @@
+import type { BillingCycle } from "@/generated/prisma/client";
+
 type BillableSubscription = {
   amount: { toString(): string } | number | string;
   currency: string;
-  billingCycle: "MONTHLY" | "YEARLY" | "WEEKLY" | "QUARTERLY";
+  billingCycle: BillingCycle;
 };
 
-const MONTHLY_FACTOR: Record<BillableSubscription["billingCycle"], number> = {
+const MONTHLY_FACTOR: Record<BillingCycle, number> = {
   MONTHLY: 1,
   YEARLY: 1 / 12,
   WEEKLY: 52 / 12,

@@ -8,11 +8,7 @@ vi.mock("@upstash/redis", () => ({
   Redis: { fromEnv: () => ({ del: delMock }) },
 }));
 
-import {
-  invalidateUserCache,
-  monthlyTotalKey,
-  subscriptionsKey,
-} from "@/lib/redis";
+import { invalidateUserCache, subscriptionsKey } from "@/lib/redis";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -25,13 +21,10 @@ afterEach(() => {
 });
 
 describe("invalidateUserCache", () => {
-  it("deletes both the monthly-total and subscriptions keys", async () => {
+  it("deletes the subscriptions key", async () => {
     await invalidateUserCache("u1");
 
-    expect(delMock).toHaveBeenCalledWith(
-      monthlyTotalKey("u1"),
-      subscriptionsKey("u1"),
-    );
+    expect(delMock).toHaveBeenCalledWith(subscriptionsKey("u1"));
   });
 
   it("redis.del THROWS: swallows the error and logs it (never rejects)", async () => {
