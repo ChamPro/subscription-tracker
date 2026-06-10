@@ -34,3 +34,4 @@ caching patterns (cache-aside, serialization, and cache-granularity optimization
 
 - [ADR-001: Technology Stack](docs/adr/001-tech-stack.md)
 - [ADR-002: Caching Strategy](docs/adr/002-caching-strategy.md)
+- [ADR-003: Cache Resilience — Stampede, Avalanche, and Penetration](docs/adr/003-cache-resilience.md)
