@@ -29,3 +29,7 @@ A subscription tracking app with authentication, CRUD, and Redis caching.
 
 Deployed and live. Implements authentication, subscription CRUD, and three Redis
 caching patterns (cache-aside, serialization, and cache-granularity optimization).
+
+## Architecture Decisions
+
+- [ADR-002: Caching Strategy](docs/adr/002-caching-strategy.md)
