@@ -1,6 +1,6 @@
 import type { BillingCycle } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { redis, subscriptionsKey } from "@/lib/redis";
+import { redis, subscriptionsKey, ttlWithJitter } from "@/lib/redis";
 import { calculateMonthlyTotal } from "@/lib/subscription-utils";
 
 export type SerializedSubscription = {
@@ -72,7 +72,7 @@ export async function getCachedSubscriptions(
       const serialized = subscriptions.map(serializeSubscription);
 
       try {
-        await redis.set(cacheKey, serialized, { ex: 3600 });
+        await redis.set(cacheKey, serialized, { ex: ttlWithJitter() });
       } catch (e) {
         console.error("Redis set failed:", e);
       }

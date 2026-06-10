@@ -4,6 +4,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/lib/redis", () => ({
   redis: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
   subscriptionsKey: (userId: string) => `user:${userId}:subscriptions`,
+  // Deterministic value inside the expected jitter range; the range assertion
+  // below is the contract the test enforces.
+  ttlWithJitter: () => 3700,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { subscription: { findMany: vi.fn() } },
@@ -83,10 +86,11 @@ describe("getCachedSubscriptions", () => {
     expect(result).toEqual([SERIALIZED]);
     expect(findMany).toHaveBeenCalledOnce();
     // Order-independent: `set` is also called for the lock acquire.
+    // TTL is jittered into [3600, 4199] to prevent cache avalanche.
     expect(set.mock.calls).toContainEqual([
       CACHE_KEY,
       [SERIALIZED],
-      { ex: 3600 },
+      { ex: expect.toSatisfy((n: number) => n >= 3600 && n < 4200) },
     ]);
   });
 
@@ -132,7 +136,7 @@ describe("getCachedSubscriptions", () => {
       expect(set.mock.calls).toContainEqual([
         CACHE_KEY,
         [SERIALIZED],
-        { ex: 3600 },
+        { ex: expect.toSatisfy((n: number) => n >= 3600 && n < 4200) },
       ]);
       expect(del).toHaveBeenCalledWith(LOCK_KEY);
     });
