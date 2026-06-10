@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock Redis + Prisma so we can force failures and avoid real infra.
 vi.mock("@/lib/redis", () => ({
-  redis: { get: vi.fn(), set: vi.fn() },
+  redis: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
   subscriptionsKey: (userId: string) => `user:${userId}:subscriptions`,
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -15,7 +15,11 @@ import { prisma } from "@/lib/prisma";
 
 const get = vi.mocked(redis.get);
 const set = vi.mocked(redis.set);
+const del = vi.mocked(redis.del);
 const findMany = vi.mocked(prisma.subscription.findMany);
+
+const CACHE_KEY = "user:u1:subscriptions";
+const LOCK_KEY = `lock:${CACHE_KEY}`;
 
 // A Prisma row (Decimal amount, Date fields) as returned by findMany.
 const DB_ROW = {
@@ -44,19 +48,22 @@ const SERIALIZED = {
 };
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  // Silence the intentional console.error in the catch branches.
+  // Reset impls AND clear once-queues so state doesn't leak across tests.
+  vi.resetAllMocks();
+  // Defaults: lock NX succeeds, cache write succeeds, lock release succeeds.
+  // Individual tests override these to exercise other paths.
+  set.mockResolvedValue("OK" as never);
+  del.mockResolvedValue(1 as never);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
-// The caching now lives in getCachedSubscriptions, so the cache-aside behavior
-// is exercised here.
 describe("getCachedSubscriptions", () => {
-  it("cache HIT: returns cached list, never touches DB", async () => {
+  it("cache HIT: returns cached list, never touches DB or lock", async () => {
     get.mockResolvedValue([SERIALIZED]);
 
     const result = await getCachedSubscriptions("u1");
@@ -64,6 +71,7 @@ describe("getCachedSubscriptions", () => {
     expect(result).toEqual([SERIALIZED]);
     expect(findMany).not.toHaveBeenCalled();
     expect(set).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
   });
 
   it("cache MISS: serializes DB rows and writes cache with 1h TTL", async () => {
@@ -74,14 +82,15 @@ describe("getCachedSubscriptions", () => {
 
     expect(result).toEqual([SERIALIZED]);
     expect(findMany).toHaveBeenCalledOnce();
-    expect(set).toHaveBeenCalledWith(
-      "user:u1:subscriptions",
+    // Order-independent: `set` is also called for the lock acquire.
+    expect(set.mock.calls).toContainEqual([
+      CACHE_KEY,
       [SERIALIZED],
       { ex: 3600 },
-    );
+    ]);
   });
 
-  it("redis.get THROWS: swallows error, falls back to DB", async () => {
+  it("redis.get THROWS: swallows error, falls back to DB (lock still acquired)", async () => {
     get.mockRejectedValue(new Error("redis down"));
     findMany.mockResolvedValue([DB_ROW] as never);
 
@@ -92,22 +101,96 @@ describe("getCachedSubscriptions", () => {
     expect(console.error).toHaveBeenCalled();
   });
 
-  it("redis.set THROWS: swallows error, still returns the list", async () => {
+  it("redis.set THROWS on cache write: swallows error, still returns the list", async () => {
     get.mockResolvedValue(null);
     findMany.mockResolvedValue([DB_ROW] as never);
-    set.mockRejectedValue(new Error("redis down"));
+    // Lock acquire resolves; cache write rejects.
+    set.mockImplementation((async (key: unknown) => {
+      if (typeof key === "string" && key.startsWith("lock:")) return "OK";
+      throw new Error("redis down");
+    }) as never);
 
     const result = await getCachedSubscriptions("u1");
 
     expect(result).toEqual([SERIALIZED]);
     expect(console.error).toHaveBeenCalled();
   });
+
+  describe("stampede protection", () => {
+    it("lock acquired (happy path): set(lock) + set(cache) + del(lock) all fire", async () => {
+      get.mockResolvedValue(null);
+      findMany.mockResolvedValue([DB_ROW] as never);
+
+      const result = await getCachedSubscriptions("u1");
+
+      expect(result).toEqual([SERIALIZED]);
+      expect(set.mock.calls).toContainEqual([
+        LOCK_KEY,
+        "1",
+        { nx: true, ex: 10 },
+      ]);
+      expect(set.mock.calls).toContainEqual([
+        CACHE_KEY,
+        [SERIALIZED],
+        { ex: 3600 },
+      ]);
+      expect(del).toHaveBeenCalledWith(LOCK_KEY);
+    });
+
+    it("lock contention, cache appears mid-retry: returns cached value, never queries DB", async () => {
+      vi.useFakeTimers();
+      // Initial check + first two retries miss; third retry finds the cache.
+      get
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce([SERIALIZED]);
+      // Lock NX fails — someone else is populating the cache.
+      set.mockResolvedValue(null as never);
+
+      const promise = getCachedSubscriptions("u1");
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await promise;
+
+      expect(result).toEqual([SERIALIZED]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+
+    it("lock contention, retries exhausted: falls back to DB and does NOT write cache", async () => {
+      vi.useFakeTimers();
+      get.mockResolvedValue(null);
+      set.mockResolvedValue(null as never); // Lock NX always fails.
+      findMany.mockResolvedValue([DB_ROW] as never);
+
+      const promise = getCachedSubscriptions("u1");
+      await vi.advanceTimersByTimeAsync(250);
+      const result = await promise;
+
+      expect(result).toEqual([SERIALIZED]);
+      expect(findMany).toHaveBeenCalledOnce();
+      // Only lock-acquire attempts on `set` — no cache-key write.
+      expect(set.mock.calls).not.toContainEqual([
+        CACHE_KEY,
+        expect.anything(),
+        expect.anything(),
+      ]);
+    });
+
+    it("lock acquired but findMany throws: del(lock) still fires (finally), error propagates", async () => {
+      get.mockResolvedValue(null);
+      findMany.mockRejectedValue(new Error("db down"));
+
+      await expect(getCachedSubscriptions("u1")).rejects.toThrow("db down");
+
+      expect(del).toHaveBeenCalledWith(LOCK_KEY);
+    });
+  });
 });
 
-// getCachedMonthlyTotal is now a thin wrapper that derives totals from the
-// subscription list — it has no cache of its own. We pin the list it gets by
-// driving getCachedSubscriptions through a cache hit (redis.get), since an
-// intra-module call can't be spied directly in ESM.
+// getCachedMonthlyTotal is a thin wrapper that derives totals from the
+// subscription list — no cache of its own. We pin the list by driving
+// getCachedSubscriptions through a cache hit (intra-module calls can't be
+// spied directly in ESM).
 describe("getCachedMonthlyTotal", () => {
   it("derives per-currency monthly totals from the subscription list", async () => {
     get.mockResolvedValue([

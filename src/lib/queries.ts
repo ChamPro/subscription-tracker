@@ -39,28 +39,72 @@ function serializeSubscription(sub: {
   };
 }
 
-export async function getCachedSubscriptions(userId: string): Promise<SerializedSubscription[]> {
+export async function getCachedSubscriptions(
+  userId: string,
+): Promise<SerializedSubscription[]> {
   const cacheKey = subscriptionsKey(userId);
+  const lockKey = `lock:${cacheKey}`;
+
+  // 1. 先查 cache
   let cached = null;
   try {
     cached = await redis.get<SerializedSubscription[]>(cacheKey);
   } catch (e) {
-    console.error('Redis get failed:', e);
+    console.error("Redis get failed:", e);
   }
   if (cached != null) return cached;
 
+  // 2. MISS：尝试抢锁（NX = 只在 key 不存在时设置成功，EX 10 = 锁超时兜底，防死锁）
+  let acquired = null;
+  try {
+    acquired = await redis.set(lockKey, "1", { nx: true, ex: 10 });
+  } catch (e) {
+    console.error("Lock acquire failed:", e);
+  }
+
+  // 3. 抢到锁：负责查 DB + 写 cache，finally 保证释放锁
+  if (acquired != null) {
+    try {
+      const subscriptions = await prisma.subscription.findMany({
+        where: { userId, status: "ACTIVE" },
+        orderBy: { nextBillingDate: "asc" },
+      });
+      const serialized = subscriptions.map(serializeSubscription);
+
+      try {
+        await redis.set(cacheKey, serialized, { ex: 3600 });
+      } catch (e) {
+        console.error("Redis set failed:", e);
+      }
+
+      return serialized;
+    } finally {
+      // 不管查 DB 成功还是抛错，一定释放锁
+      try {
+        await redis.del(lockKey);
+      } catch (e) {
+        console.error("Lock release failed:", e);
+      }
+    }
+  }
+
+  // 4. 没抢到锁：别人正在查，等一会儿再看 cache（重试 5 次，每次 50ms）
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    try {
+      cached = await redis.get<SerializedSubscription[]>(cacheKey);
+    } catch (e) {
+      console.error("Redis get failed:", e);
+    }
+    if (cached != null) return cached;
+  }
+
+  // 5. 重试后 cache 仍为空（持锁者太慢或失败）：降级，自己查 DB（不写 cache，避免与持锁者冲突）
   const subscriptions = await prisma.subscription.findMany({
     where: { userId, status: "ACTIVE" },
     orderBy: { nextBillingDate: "asc" },
   });
-
-  const serializedSubscriptions = subscriptions.map(serializeSubscription);
-  try {
-    await redis.set(cacheKey, serializedSubscriptions, { ex: 3600 });
-  } catch (e) {
-    console.error('Redis set failed:', e);
-  }
-  return serializedSubscriptions;
+  return subscriptions.map(serializeSubscription);
 }
 
 export async function getCachedMonthlyTotal(
