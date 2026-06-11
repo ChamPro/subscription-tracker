@@ -14,6 +14,9 @@ A subscription tracking app with authentication, CRUD, and Redis caching.
 
 ## Architecture
 
+System overview — the browser talks only to Next.js on Vercel, which fronts two
+managed backends:
+
 ```mermaid
 flowchart LR
     Browser["Browser"]
@@ -23,25 +26,39 @@ flowchart LR
         SA["Server Actions<br/>(writes)"]
     end
 
-    Redis[("Upstash Redis<br/>REST")]
-    DB[("Supabase Postgres<br/>via pooler")]
+    DB[("Supabase Postgres<br/>via connection pooler")]
+    Redis[("Upstash Redis<br/>REST / HTTP")]
 
     Browser -->|page request| RSC
     Browser -->|form submit| SA
-
-    %% cache-aside read path
-    RSC -->|1 . GET key| Redis
-    Redis -.->|2 . miss| RSC
-    RSC -->|3 . query| DB
-    RSC -->|4 . SET key, TTL + jitter| Redis
-
-    %% write path
-    SA -->|mutate| DB
-    SA -->|invalidate: DEL key| Redis
+    RSC --> Redis
+    RSC --> DB
+    SA --> DB
+    SA --> Redis
 ```
 
-**Read (cache-aside):** Server Component checks Redis → on a miss, queries Postgres, writes the serialized result back to Redis (with jittered TTL), and returns it.
-**Write:** a Server Action mutates Postgres, then invalidates the user's cache key so the next read repopulates it. See [ADR-002](docs/adr/002-caching-strategy.md) and [ADR-003](docs/adr/003-cache-resilience.md).
+Cache-aside data flow — reads are served from Redis when warm; writes mutate
+Postgres and drop the cache so the next read repopulates it:
+
+```mermaid
+flowchart TB
+    subgraph Read["Read (cache-aside)"]
+        direction TB
+        R0["getCachedSubscriptions"] --> R1{"cache hit?"}
+        R1 -->|hit| R2["return cached"]
+        R1 -->|miss| R3["query Postgres"]
+        R3 --> R4["write cache<br/>(TTL + jitter)"]
+        R4 --> R5["return"]
+    end
+
+    subgraph Write["Write (mutation)"]
+        direction TB
+        W0["create / update / delete"] --> W1["mutate Postgres"]
+        W1 --> W2["invalidate cache<br/>(DEL key)"]
+    end
+```
+
+See [ADR-002](docs/adr/002-caching-strategy.md) and [ADR-003](docs/adr/003-cache-resilience.md) for the caching rationale.
 
 ## Tech Stack
 
