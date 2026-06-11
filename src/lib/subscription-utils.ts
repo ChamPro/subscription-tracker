@@ -1,5 +1,65 @@
 import type { BillingCycle } from "@/generated/prisma/client";
 
+/**
+ * Advance a subscription's nextBillingDate forward by its billing cycle until
+ * the UTC day is >= today's UTC day. If the date is already today or in the
+ * future, it is returned unchanged. Input and output are UTC ISO strings.
+ *
+ * Uses the same UTC-day comparison style as getUpcomingBills.
+ */
+export function advanceBillingDate(
+  nextBillingDate: string,
+  billingCycle: BillingCycle,
+  now = new Date(),
+): string {
+  const d = new Date(nextBillingDate);
+  // Guard against an unparseable input (NaN never satisfies the loop exit).
+  if (Number.isNaN(d.getTime())) {
+    return nextBillingDate;
+  }
+
+  const dayUtc = (date: Date) =>
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const todayUtc = dayUtc(now);
+
+  // Already today or in the future — return the input unchanged.
+  if (dayUtc(d) >= todayUtc) {
+    return nextBillingDate;
+  }
+
+  // WEEKLY: plain +7-day stepping — no month-length subtleties.
+  if (billingCycle === "WEEKLY") {
+    let cur = d;
+    while (dayUtc(cur) < todayUtc) {
+      cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
+    }
+    return cur.toISOString();
+  }
+
+  // Month-based cycles: always recompute from the ORIGINAL anchor day and clamp
+  // to the target month's length, so a bill on the 31st becomes Feb 28 → Mar 31
+  // (no cumulative drift to the 3rd that would otherwise persist on edit/save).
+  const stepMonths =
+    billingCycle === "QUARTERLY" ? 3 : billingCycle === "YEARLY" ? 12 : 1;
+  const anchorDay = d.getUTCDate();
+  const startYear = d.getUTCFullYear();
+  const startMonth = d.getUTCMonth();
+
+  const daysInMonth = (y: number, m: number) =>
+    new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+
+  for (let step = 1; ; step++) {
+    const totalMonths = startMonth + step * stepMonths;
+    const y = startYear + Math.floor(totalMonths / 12);
+    const m = ((totalMonths % 12) + 12) % 12;
+    const day = Math.min(anchorDay, daysInMonth(y, m));
+    const candidate = new Date(Date.UTC(y, m, day));
+    if (dayUtc(candidate) >= todayUtc) {
+      return candidate.toISOString();
+    }
+  }
+}
+
 type BillableSubscription = {
   amount: { toString(): string } | number | string;
   currency: string;

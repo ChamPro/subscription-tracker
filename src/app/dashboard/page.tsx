@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { getCachedMonthlyTotal, getCachedSubscriptions } from "@/lib/queries";
-import { getUpcomingBills } from "@/lib/subscription-utils";
+import { advanceBillingDate, getUpcomingBills } from "@/lib/subscription-utils";
 import { DeleteButton } from "./DeleteButton";
 
 export default async function DashboardPage() {
@@ -14,10 +14,20 @@ export default async function DashboardPage() {
 
   const subscriptions = await getCachedSubscriptions(session.user.id);
 
+  // Derive a display list with billing dates rolled forward to the next
+  // future occurrence. Used for both the list rows and Upcoming Bills.
+  // Re-sort by the rolled-forward date so rows stay in next-billing order.
+  const displaySubscriptions = subscriptions
+    .map((sub) => ({
+      ...sub,
+      nextBillingDate: advanceBillingDate(sub.nextBillingDate, sub.billingCycle),
+    }))
+    .sort((a, b) => a.nextBillingDate.localeCompare(b.nextBillingDate));
+
   const monthlyTotals = await getCachedMonthlyTotal(session.user.id);
   const totalEntries = Object.entries(monthlyTotals);
 
-  const upcomingBills = getUpcomingBills(subscriptions);
+  const upcomingBills = getUpcomingBills(displaySubscriptions);
 
   return (
     <div className="flex flex-1 flex-col items-center bg-zinc-50 py-12 dark:bg-black">
@@ -56,7 +66,7 @@ export default async function DashboardPage() {
                   key={currency}
                   className="text-2xl font-semibold text-black dark:text-zinc-50"
                 >
-                  ${total.toFixed(2)} {currency}
+                  {total.toFixed(2)} {currency}
                 </p>
               ))}
             </div>
@@ -106,13 +116,13 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        {subscriptions.length === 0 ? (
+        {displaySubscriptions.length === 0 ? (
           <p className="text-zinc-500 dark:text-zinc-400">
             No active subscriptions yet
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {subscriptions.map((sub) => (
+            {displaySubscriptions.map((sub) => (
               <li
                 key={sub.id}
                 className="flex items-center justify-between rounded-lg border border-black/[.08] bg-white px-4 py-3 dark:border-white/[.145] dark:bg-[#0a0a0a]"

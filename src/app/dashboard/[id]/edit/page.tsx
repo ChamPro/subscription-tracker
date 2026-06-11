@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { advanceBillingDate } from "@/lib/subscription-utils";
 import { EditSubscriptionForm } from "./EditSubscriptionForm";
 
 export default async function EditPage({
@@ -31,7 +32,10 @@ export default async function EditPage({
         amount: Number(sub.amount),
         currency: sub.currency,
         billingCycle: sub.billingCycle,
-        nextBillingDate: sub.nextBillingDate.toISOString().slice(0, 10),
+        nextBillingDate: advanceBillingDate(
+          sub.nextBillingDate.toISOString(),
+          sub.billingCycle,
+        ).slice(0, 10),
         startDate: sub.startDate.toISOString().slice(0, 10),
         category: sub.category ?? null,
       }}

@@ -1,6 +1,13 @@
-import { signIn } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { auth, signIn } from "@/lib/auth";
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const session = await auth();
+
+  if (session?.user) {
+    redirect("/dashboard");
+  }
+
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 dark:bg-black">
       <form

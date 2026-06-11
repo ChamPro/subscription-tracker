@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { calculateMonthlyTotal, getUpcomingBills } from "./subscription-utils";
+import {
+  calculateMonthlyTotal,
+  getUpcomingBills,
+  advanceBillingDate,
+} from "./subscription-utils";
 
 describe("calculateMonthlyTotal", () => {
   it("handles MONTHLY only", () => {
@@ -141,5 +145,122 @@ describe("getUpcomingBills", () => {
     const result = getUpcomingBills([sub], 7, NOW);
     expect(result).toHaveLength(1);
     expect(result[0].daysUntil).toBe(3);
+  });
+});
+
+describe("advanceBillingDate", () => {
+  // Fixed reference point: 2026-06-15 at noon UTC (same convention as getUpcomingBills tests).
+  const NOW = new Date("2026-06-15T12:00:00Z");
+
+  it("returns the date unchanged when it is in the future", () => {
+    const future = "2026-06-20T00:00:00Z";
+    expect(advanceBillingDate(future, "MONTHLY", NOW)).toBe(future);
+  });
+
+  it("returns the date unchanged when it is exactly today (UTC day)", () => {
+    const today = "2026-06-15T00:00:00Z";
+    expect(advanceBillingDate(today, "MONTHLY", NOW)).toBe(today);
+  });
+
+  it("advances one MONTHLY step when the date is one month in the past", () => {
+    // 2026-05-15 is past; one MONTHLY step → 2026-06-15 (today → unchanged)
+    const past = "2026-05-15T00:00:00Z";
+    const result = advanceBillingDate(past, "MONTHLY", NOW);
+    const d = new Date(result);
+    // 2026-06-15 UTC
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(5); // June (0-indexed)
+    expect(d.getUTCDate()).toBe(15);
+  });
+
+  it("advances multiple MONTHLY steps when the date is several months in the past", () => {
+    // 2026-01-10 is ~5 months in the past; should land on 2026-07-10
+    const past = "2026-01-10T00:00:00Z";
+    const result = advanceBillingDate(past, "MONTHLY", NOW);
+    const d = new Date(result);
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(6); // July
+    expect(d.getUTCDate()).toBe(10);
+  });
+
+  it("advances WEEKLY by 7-day steps until >= today", () => {
+    // 2026-06-08 is 7 days ago; one +7 step → 2026-06-15 (today → ok)
+    const past = "2026-06-08T00:00:00Z";
+    const result = advanceBillingDate(past, "WEEKLY", NOW);
+    const d = new Date(result);
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(5);
+    expect(d.getUTCDate()).toBe(15);
+  });
+
+  it("advances QUARTERLY by 3-month steps until >= today", () => {
+    // 2026-03-10 is ~3 months ago; one QUARTERLY step → 2026-06-10 (still past today 15th, so another step → 2026-09-10)
+    const past = "2025-12-10T00:00:00Z";
+    const result = advanceBillingDate(past, "QUARTERLY", NOW);
+    const d = new Date(result);
+    // From 2025-12-10: +3m → 2026-03-10 (still past), +3m → 2026-06-10 (still past 15), +3m → 2026-09-10
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(8); // September
+    expect(d.getUTCDate()).toBe(10);
+  });
+
+  it("advances YEARLY by 1-year steps until >= today", () => {
+    // 2025-06-10 is past; one YEARLY step → 2026-06-10 (still past day 15), another → 2027-06-10
+    const past = "2024-06-10T00:00:00Z";
+    const result = advanceBillingDate(past, "YEARLY", NOW);
+    const d = new Date(result);
+    // 2024-06-10 → 2025-06-10 (past) → 2026-06-10 (past day 15) → 2027-06-10
+    expect(d.getUTCFullYear()).toBe(2027);
+    expect(d.getUTCMonth()).toBe(5); // June
+    expect(d.getUTCDate()).toBe(10);
+  });
+
+  it("clamps a month-end day to the target month (Jan 31 -> Feb 28, not Mar 3)", () => {
+    const result = advanceBillingDate(
+      "2026-01-31T00:00:00Z",
+      "MONTHLY",
+      new Date("2026-02-01T12:00:00Z"),
+    );
+    const d = new Date(result);
+    expect(d.getUTCMonth()).toBe(1); // February
+    expect(d.getUTCDate()).toBe(28); // clamped, not drifted to March 3
+  });
+
+  it("restores the original anchor day after a short month (Jan 31 -> Mar 31)", () => {
+    const result = advanceBillingDate(
+      "2026-01-31T00:00:00Z",
+      "MONTHLY",
+      new Date("2026-03-01T12:00:00Z"),
+    );
+    const d = new Date(result);
+    expect(d.getUTCMonth()).toBe(2); // March
+    expect(d.getUTCDate()).toBe(31); // anchor day restored — no cumulative drift
+  });
+
+  it("clamps YEARLY Feb 29 into a non-leap year (-> Feb 28)", () => {
+    const result = advanceBillingDate(
+      "2024-02-29T00:00:00Z",
+      "YEARLY",
+      new Date("2025-01-01T12:00:00Z"),
+    );
+    const d = new Date(result);
+    expect(d.getUTCFullYear()).toBe(2025);
+    expect(d.getUTCMonth()).toBe(1); // February
+    expect(d.getUTCDate()).toBe(28);
+  });
+
+  it("clamps QUARTERLY across a shorter month (Aug 31 -> Nov 30)", () => {
+    const result = advanceBillingDate(
+      "2026-08-31T00:00:00Z",
+      "QUARTERLY",
+      new Date("2026-10-01T12:00:00Z"),
+    );
+    const d = new Date(result);
+    expect(d.getUTCMonth()).toBe(10); // November
+    expect(d.getUTCDate()).toBe(30); // clamped from 31
+  });
+
+  it("returns the input unchanged for an unparseable date", () => {
+    expect(advanceBillingDate("not-a-date", "MONTHLY", NOW)).toBe("not-a-date");
   });
 });
