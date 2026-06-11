@@ -13,7 +13,7 @@ export default async function EditPage({
 
   const session = await auth();
   if (!session?.user) {
-    redirect("/login");
+    redirect("/");
   }
 
   const sub = await prisma.subscription.findFirst({

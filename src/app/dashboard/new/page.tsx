@@ -5,7 +5,7 @@ import { NewSubscriptionForm } from "./NewSubscriptionForm";
 export default async function NewSubscriptionPage() {
   const session = await auth();
   if (!session?.user) {
-    redirect("/login");
+    redirect("/");
   }
 
   const today = new Date().toISOString().slice(0, 10);
