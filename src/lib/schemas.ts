@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export type FormState = {
+  errors?: Record<string, string[]>;
+};
+
 export const subscriptionSchema = z
   .object({
     name: z.string().min(1).max(100),

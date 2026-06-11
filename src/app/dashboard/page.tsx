@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { getCachedMonthlyTotal, getCachedSubscriptions } from "@/lib/queries";
-import { deleteSubscription } from "./actions";
+import { getUpcomingBills } from "@/lib/subscription-utils";
+import { DeleteButton } from "./DeleteButton";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -15,6 +16,8 @@ export default async function DashboardPage() {
 
   const monthlyTotals = await getCachedMonthlyTotal(session.user.id);
   const totalEntries = Object.entries(monthlyTotals);
+
+  const upcomingBills = getUpcomingBills(subscriptions);
 
   return (
     <div className="flex flex-1 flex-col items-center bg-zinc-50 py-12 dark:bg-black">
@@ -60,6 +63,37 @@ export default async function DashboardPage() {
           )}
         </div>
 
+        <div className="mb-8 rounded-lg border border-black/[.08] bg-white px-5 py-4 dark:border-white/[.145] dark:bg-[#0a0a0a]">
+          <h2 className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+            Upcoming Bills
+          </h2>
+          {upcomingBills.length === 0 ? (
+            <p className="text-zinc-500 dark:text-zinc-400">
+              No upcoming bills in the next 7 days
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {upcomingBills.map((bill) => {
+                const dueText =
+                  bill.daysUntil === 0
+                    ? "due today"
+                    : bill.daysUntil === 1
+                      ? "in 1 day"
+                      : `in ${bill.daysUntil} days`;
+                return (
+                  <p
+                    key={bill.id}
+                    className="text-sm text-black dark:text-zinc-50"
+                  >
+                    {bill.name} — {bill.amount.toFixed(2)} {bill.currency} —{" "}
+                    {dueText}
+                  </p>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-lg font-medium text-black dark:text-zinc-50">
             Active subscriptions
@@ -100,15 +134,7 @@ export default async function DashboardPage() {
                   >
                     Edit
                   </Link>
-                  <form action={deleteSubscription}>
-                    <input type="hidden" name="id" value={sub.id} />
-                    <button
-                      type="submit"
-                      className="rounded-full border border-solid border-black/[.08] px-3 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
-                    >
-                      Delete
-                    </button>
-                  </form>
+                  <DeleteButton id={sub.id} />
                 </div>
               </li>
             ))}

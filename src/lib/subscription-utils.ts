@@ -6,6 +6,18 @@ type BillableSubscription = {
   billingCycle: BillingCycle;
 };
 
+type UpcomingBillSubscription = {
+  id: string;
+  name: string;
+  amount: number;
+  currency: string;
+  nextBillingDate: string; // ISO string
+};
+
+export type UpcomingBill = UpcomingBillSubscription & {
+  daysUntil: number;
+};
+
 const MONTHLY_FACTOR: Record<BillingCycle, number> = {
   MONTHLY: 1,
   YEARLY: 1 / 12,
@@ -33,4 +45,47 @@ export function calculateMonthlyTotal(
   }
 
   return totals;
+}
+
+/**
+ * Return subscriptions whose nextBillingDate falls between today (local
+ * midnight of `now`) and today + `days` days (inclusive), each augmented
+ * with `daysUntil: number` (0 = due today). Sorted ascending by daysUntil.
+ * Past-due bills (before today's midnight) are excluded.
+ */
+export function getUpcomingBills(
+  subs: UpcomingBillSubscription[],
+  days = 7,
+  now = new Date(),
+): UpcomingBill[] {
+  // Compare on the UTC calendar day. nextBillingDate is stored as a UTC-midnight
+  // ISO string (Date.toISOString()), so normalizing `now` the same way keeps the
+  // comparison correct regardless of the server's local timezone.
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const todayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  // End boundary: start of (today + days + 1) — i.e. day `days` is inclusive.
+  const endUtc = todayUtc + (days + 1) * msPerDay;
+
+  const result: UpcomingBill[] = [];
+
+  for (const sub of subs) {
+    const d = new Date(sub.nextBillingDate);
+    const billingUtc = Date.UTC(
+      d.getUTCFullYear(),
+      d.getUTCMonth(),
+      d.getUTCDate(),
+    );
+
+    if (billingUtc >= todayUtc && billingUtc < endUtc) {
+      const daysUntil = Math.round((billingUtc - todayUtc) / msPerDay);
+      result.push({ ...sub, daysUntil });
+    }
+  }
+
+  result.sort((a, b) => a.daysUntil - b.daysUntil);
+  return result;
 }

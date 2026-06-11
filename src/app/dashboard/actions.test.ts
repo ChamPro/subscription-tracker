@@ -45,6 +45,20 @@ function validForm() {
   return fd;
 }
 
+function invalidForm() {
+  const fd = new FormData();
+  // missing required fields — amount is negative, name is empty
+  fd.set("name", "");
+  fd.set("amount", "-5");
+  fd.set("currency", "USD");
+  fd.set("billingCycle", "MONTHLY");
+  fd.set("nextBillingDate", "2099-01-01");
+  fd.set("startDate", "2020-01-01");
+  return fd;
+}
+
+const emptyState = {};
+
 beforeEach(() => {
   vi.clearAllMocks();
   authMock.mockResolvedValue({ user: { id: "u1" } } as never);
@@ -60,22 +74,59 @@ afterEach(() => {
 });
 
 describe("createSubscription", () => {
-  it("creates, then invalidates the user's cache", async () => {
-    await expect(createSubscription(validForm())).resolves.toBeUndefined();
+  it("creates, then invalidates the user's cache on valid input", async () => {
+    const result = await createSubscription(emptyState, validForm());
 
     expect(create).toHaveBeenCalledOnce();
     expect(invalidate).toHaveBeenCalledWith("u1");
+    // redirect is mocked so no return value on success path
+    expect(result).toBeUndefined();
+  });
+
+  it("returns field errors and does NOT call prisma on invalid input", async () => {
+    const result = await createSubscription(emptyState, invalidForm());
+
+    expect(result).toMatchObject({ errors: expect.any(Object) });
+    expect(create).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when there is no session", async () => {
+    authMock.mockResolvedValue(null as never);
+
+    await expect(
+      createSubscription(emptyState, validForm()),
+    ).rejects.toThrow("Unauthorized");
+
+    expect(create).not.toHaveBeenCalled();
   });
 });
 
 describe("updateSubscription", () => {
-  it("updates, then invalidates the user's cache", async () => {
-    await expect(
-      updateSubscription("sub1", validForm()),
-    ).resolves.toBeUndefined();
+  it("updates, then invalidates the user's cache on valid input", async () => {
+    const result = await updateSubscription("sub1", emptyState, validForm());
 
     expect(updateMany).toHaveBeenCalledOnce();
     expect(invalidate).toHaveBeenCalledWith("u1");
+    expect(result).toBeUndefined();
+  });
+
+  it("returns field errors and does NOT call prisma on invalid input", async () => {
+    const result = await updateSubscription("sub1", emptyState, invalidForm());
+
+    expect(result).toMatchObject({ errors: expect.any(Object) });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("throws Unauthorized when there is no session", async () => {
+    authMock.mockResolvedValue(null as never);
+
+    await expect(
+      updateSubscription("sub1", emptyState, validForm()),
+    ).rejects.toThrow("Unauthorized");
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 
