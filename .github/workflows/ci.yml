@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    # Placeholder values only — nothing here is a real credential.
+    # Unit tests mock Prisma/Redis/NextAuth entirely and need no env at all;
+    # `next build` currently renders every data-touching route on demand, so it
+    # does not need them either. These are here as a guard: the day a route
+    # becomes statically prerendered, module-level init (PrismaPg connection
+    # string, Redis.fromEnv()) would run at build time and fail without them.
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db
+      DIRECT_URL: postgresql://user:pass@localhost:5432/db
+      AUTH_SECRET: ci-placeholder-not-a-real-secret
+      AUTH_GOOGLE_ID: ci-placeholder
+      AUTH_GOOGLE_SECRET: ci-placeholder
+      UPSTASH_REDIS_REST_URL: http://localhost:8079
+      UPSTASH_REDIS_REST_TOKEN: ci-placeholder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # src/generated/prisma is gitignored, so the client must be generated
+      # before tsc/build can resolve @/generated/prisma.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      # Fails the job if coverage drops below the thresholds in vitest.config.ts.
+      - name: Test with coverage
+        run: npx vitest run --coverage
+
+      - name: Build
+        run: npm run build
+
+      # Gate on high/critical only — low/moderate noise would keep CI red for
+      # things nobody is going to act on. Runs last so a dependency advisory
+      # never hides a broken test or build.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
