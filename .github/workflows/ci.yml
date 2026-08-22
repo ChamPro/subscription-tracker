@@ -52,6 +52,15 @@ jobs:
       - name: Test with coverage
         run: npx vitest run --coverage
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          # Public repo: tokenless upload works. If the repo ever goes
+          # private, add CODECOV_TOKEN to the repo's Actions secrets.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
       - name: Build
         run: npm run build
 
