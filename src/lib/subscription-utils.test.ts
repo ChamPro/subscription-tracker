@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   calculateMonthlyTotal,
   getUpcomingBills,
   advanceBillingDate,
   isUsableDate,
+  formatCalendarDate,
 } from "./subscription-utils";
 
 describe("calculateMonthlyTotal", () => {
@@ -294,5 +295,79 @@ describe("isUsableDate", () => {
     expect(isUsableDate(value) && value.toISOString()).toBe(
       "2026-09-02T00:00:00.000Z",
     );
+  });
+});
+
+describe("formatCalendarDate", () => {
+  // Timezones are set explicitly rather than inherited from the machine running
+  // the tests, so this suite behaves the same on a laptop in EDT and on a CI
+  // runner in UTC. Node re-reads process.env.TZ per Date operation.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function withTz(tz: string, fn: () => void) {
+    vi.stubEnv("TZ", tz);
+    fn();
+  }
+
+  // Midnight UTC — how every calendar date in this app is stored. This is the
+  // instant that rolls backwards a day when rendered west of UTC.
+  const SEP_4 = "2026-09-04T00:00:00.000Z";
+
+  const WESTERN_ZONES = [
+    "America/New_York", // UTC-4 in September
+    "America/Los_Angeles", // UTC-7
+    "Pacific/Honolulu", // UTC-10
+    "Pacific/Niue", // UTC-11, the furthest west
+  ];
+
+  it.each(WESTERN_ZONES)(
+    "keeps the stored day intact in %s (no roll-back)",
+    (tz) => {
+      withTz(tz, () => {
+        expect(formatCalendarDate(SEP_4, "en-CA")).toBe("2026-09-04");
+      });
+    },
+  );
+
+  it.each(["UTC", "Europe/Berlin", "Asia/Tokyo", "Pacific/Kiritimati"])(
+    "renders the same day in %s",
+    (tz) => {
+      withTz(tz, () => {
+        expect(formatCalendarDate(SEP_4, "en-CA")).toBe("2026-09-04");
+      });
+    },
+  );
+
+  it("is the fix for a bug that the local-timezone version really has", () => {
+    // Guards the guard: if the naive call ever stopped rolling the day back,
+    // the assertions above would pass for the wrong reason.
+    withTz("America/New_York", () => {
+      expect(new Date(SEP_4).toLocaleDateString("en-CA")).toBe("2026-09-03");
+      expect(formatCalendarDate(SEP_4, "en-CA")).toBe("2026-09-04");
+    });
+  });
+
+  it("agrees with the ISO string's own date part, whatever the zone", () => {
+    for (const tz of [...WESTERN_ZONES, "UTC", "Asia/Tokyo"]) {
+      withTz(tz, () => {
+        for (const iso of [
+          "2026-01-01T00:00:00.000Z",
+          "2026-09-04T00:00:00.000Z",
+          "2026-12-31T00:00:00.000Z", // year boundary — would roll to 2025 west of UTC
+          "2028-02-29T00:00:00.000Z", // leap day — would roll to Feb 28
+        ]) {
+          expect(formatCalendarDate(iso, "en-CA")).toBe(iso.slice(0, 10));
+        }
+      });
+    }
+  });
+
+  it("honours the requested locale while keeping the zone pinned", () => {
+    withTz("America/Los_Angeles", () => {
+      expect(formatCalendarDate(SEP_4, "en-US")).toBe("9/4/2026");
+      expect(formatCalendarDate(SEP_4, "de-DE")).toBe("4.9.2026");
+    });
   });
 });

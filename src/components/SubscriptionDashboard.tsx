@@ -1,6 +1,10 @@
 import Link from "next/link";
 import type { SerializedSubscription } from "@/lib/queries";
-import { advanceBillingDate, getUpcomingBills } from "@/lib/subscription-utils";
+import {
+  advanceBillingDate,
+  formatCalendarDate,
+  getUpcomingBills,
+} from "@/lib/subscription-utils";
 import { DeleteButton } from "@/app/dashboard/DeleteButton";
 
 interface Props {
@@ -111,7 +115,7 @@ export function SubscriptionDashboard({
                 <span className="text-sm text-zinc-600 dark:text-zinc-400">
                   {sub.amount.toFixed(2)} {sub.currency} ·{" "}
                   {sub.billingCycle.toLowerCase()} · next{" "}
-                  {new Date(sub.nextBillingDate).toLocaleDateString()}
+                  {formatCalendarDate(sub.nextBillingDate)}
                 </span>
               </div>
               {!readOnly && (
