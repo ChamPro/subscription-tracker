@@ -1,0 +1,40 @@
+name: Keep-alive
+
+# Supabase pauses free-tier projects that see no database activity, which has
+# taken sign-in down more than once. /api/health runs a real `SELECT 1`, so
+# pinging it counts as activity. Note that /demo will not do — it serves
+# hardcoded data and never touches the database.
+on:
+  schedule:
+    # Every 3 days at 07:00 UTC. Well inside Supabase's inactivity window,
+    # and cheap enough that drift in GitHub's cron scheduling does not matter.
+    - cron: "0 7 */3 * *"
+  # Allows a manual run from the Actions tab, e.g. right after restoring a
+  # paused project.
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          echo "Pinging $URL"
+          # --retry covers a cold start: the first request after a quiet spell
+          # can be slow enough to time out while the database wakes up.
+          code=$(curl --silent --show-error --location \
+                      --retry 3 --retry-delay 20 --retry-all-errors \
+                      --max-time 60 \
+                      --output response.json --write-out '%{http_code}' \
+                      "$URL")
+          echo "HTTP $code"
+          cat response.json || true
+          echo
+          # A 200 that is not {"status":"ok"} would mean the route responded
+          # without reaching the database, so check the body too.
+          if [ "$code" != "200" ] || ! grep -q '"status":"ok"' response.json; then
+            echo "::error::Health check failed (HTTP $code) — the database may be paused."
+            exit 1
+          fi
+        env:
+          URL: https://subscription-tracker-umber.vercel.app/api/health
