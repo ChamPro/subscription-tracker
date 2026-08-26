@@ -3,6 +3,7 @@ import {
   calculateMonthlyTotal,
   getUpcomingBills,
   advanceBillingDate,
+  isUsableDate,
 } from "./subscription-utils";
 
 describe("calculateMonthlyTotal", () => {
@@ -262,5 +263,36 @@ describe("advanceBillingDate", () => {
 
   it("returns the input unchanged for an unparseable date", () => {
     expect(advanceBillingDate("not-a-date", "MONTHLY", NOW)).toBe("not-a-date");
+  });
+});
+
+describe("isUsableDate", () => {
+  it("accepts a normal Date", () => {
+    expect(isUsableDate(new Date("2026-09-02T00:00:00.000Z"))).toBe(true);
+  });
+
+  it("rejects a Date whose time is NaN", () => {
+    // What the database driver hands back when it cannot parse the stored
+    // timestamp — the exact value that used to crash the dashboard. It is a
+    // real Date instance, so `instanceof` alone would let it through.
+    const invalid = new Date("202609-02-05T05:00:00+00:00");
+
+    expect(invalid).toBeInstanceOf(Date);
+    expect(Number.isNaN(invalid.getTime())).toBe(true);
+    expect(isUsableDate(invalid)).toBe(false);
+  });
+
+  it("rejects non-Date values", () => {
+    for (const value of [null, undefined, "2026-09-02", 0, {}, NaN]) {
+      expect(isUsableDate(value)).toBe(false);
+    }
+  });
+
+  it("narrows the type, so .toISOString() is safe behind the guard", () => {
+    const value: unknown = new Date("2026-09-02T00:00:00.000Z");
+
+    expect(isUsableDate(value) && value.toISOString()).toBe(
+      "2026-09-02T00:00:00.000Z",
+    );
   });
 });

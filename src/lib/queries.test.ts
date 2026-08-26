@@ -191,6 +191,101 @@ describe("getCachedSubscriptions", () => {
   });
 });
 
+// One malformed row must not take the dashboard down. The driver returns a Date
+// whose time is NaN when it cannot parse the stored timestamp (a six-digit year
+// does this), and .toISOString() on that throws RangeError.
+describe("unreadable dates (defense in depth)", () => {
+  // A real Date instance, but getTime() is NaN — exactly what the driver
+  // produced for the row that broke production.
+  const INVALID_DATE = new Date("202609-02-05T05:00:00+00:00");
+
+  const BAD_ROW = {
+    ...DB_ROW,
+    id: "bad1",
+    name: "bikaboom",
+    nextBillingDate: INVALID_DATE,
+  };
+
+  it("the fixture really is an Invalid Date", () => {
+    expect(INVALID_DATE).toBeInstanceOf(Date);
+    expect(Number.isNaN(INVALID_DATE.getTime())).toBe(true);
+  });
+
+  it("skips the bad row and returns the good ones instead of throwing", async () => {
+    get.mockResolvedValue(null);
+    findMany.mockResolvedValue([BAD_ROW, DB_ROW] as never);
+
+    const result = await getCachedSubscriptions("u1");
+
+    expect(result).toEqual([SERIALIZED]);
+  });
+
+  it("logs the row id and the field that was unreadable", async () => {
+    get.mockResolvedValue(null);
+    findMany.mockResolvedValue([BAD_ROW] as never);
+
+    await getCachedSubscriptions("u1");
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("bad1"),
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("nextBillingDate"),
+    );
+  });
+
+  it("names startDate when that is the broken field", async () => {
+    get.mockResolvedValue(null);
+    findMany.mockResolvedValue([
+      { ...DB_ROW, id: "bad2", startDate: INVALID_DATE },
+    ] as never);
+
+    await getCachedSubscriptions("u1");
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("startDate"),
+    );
+  });
+
+  it("does not write the bad row into the cache", async () => {
+    get.mockResolvedValue(null);
+    findMany.mockResolvedValue([BAD_ROW, DB_ROW] as never);
+
+    await getCachedSubscriptions("u1");
+
+    expect(set.mock.calls).toContainEqual([
+      CACHE_KEY,
+      [SERIALIZED],
+      { ex: expect.toSatisfy((n: number) => n >= 3600 && n < 4200) },
+    ]);
+  });
+
+  it("skips bad rows on the lock-contention fallback path too", async () => {
+    vi.useFakeTimers();
+    get.mockResolvedValue(null);
+    set.mockResolvedValue(null as never); // Lock NX always fails.
+    findMany.mockResolvedValue([BAD_ROW, DB_ROW] as never);
+
+    const promise = getCachedSubscriptions("u1");
+    await vi.advanceTimersByTimeAsync(250);
+
+    await expect(promise).resolves.toEqual([SERIALIZED]);
+  });
+
+  it("keeps the monthly total free of skipped rows", async () => {
+    // The bad row costs 999; if it leaked into the total it would show up here.
+    get.mockResolvedValue(null);
+    findMany.mockResolvedValue([
+      { ...BAD_ROW, amount: 999 },
+      { ...DB_ROW, amount: 10, currency: "USD", billingCycle: "MONTHLY" },
+    ] as never);
+
+    const result = await getCachedMonthlyTotal("u1");
+
+    expect(result).toEqual({ USD: 10 });
+  });
+});
+
 // getCachedMonthlyTotal is a thin wrapper that derives totals from the
 // subscription list — no cache of its own. We pin the list by driving
 // getCachedSubscriptions through a cache hit (intra-module calls can't be
