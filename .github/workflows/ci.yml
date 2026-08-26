@@ -67,5 +67,16 @@ jobs:
       # Gate on high/critical only — low/moderate noise would keep CI red for
       # things nobody is going to act on. Runs last so a dependency advisory
       # never hides a broken test or build.
+      #
+      # Wrapped rather than calling `npm audit --audit-level=high` directly, so
+      # that a single advisory can be accepted in writing without lowering the
+      # bar for every other one. Each accepted advisory carries a reason it
+      # cannot reach production and a condition for deleting it; anything not on
+      # that list still fails, and an entry that stops firing is reported as
+      # stale. See scripts/audit-ci.mjs.
+      #
+      # Note `--omit=dev` does NOT work as a substitute here: @prisma/client is a
+      # production dependency and peer-depends on prisma, so npm records the
+      # prisma CLI as devOptional and keeps it in the production graph.
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: node scripts/audit-ci.mjs
