@@ -1,6 +1,38 @@
 import type { BillingCycle } from "@/generated/prisma/client";
 
 /**
+ * True when a Date that came from outside the app is actually usable.
+ *
+ * A date read back from the database is typed as `Date` but is not guaranteed
+ * to be a valid one. The driver builds it by parsing a string, and when that
+ * parse fails it hands back a Date whose time is NaN instead of throwing — so
+ * the bad value flows through unnoticed until something calls .toISOString()
+ * on it and gets a RangeError. Anything that serializes or renders a stored
+ * date checks it here first, the same way we never assume Redis is reachable.
+ */
+export function isUsableDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+/**
+ * Format a stored date for display, pinned to UTC.
+ *
+ * nextBillingDate and startDate are calendar dates — the day the user picked in
+ * an <input type="date">, with no time-of-day meaning. They are stored at
+ * midnight UTC, so rendering them in the viewer's local zone is not a harmless
+ * reformat: west of UTC, midnight UTC lands on the previous evening and the day
+ * silently goes backwards. A bill on the 4th shows as the 3rd.
+ *
+ * Passing `timeZone: "UTC"` keeps the displayed day equal to the stored day
+ * everywhere. Parsing, comparison and rendering then all share one reference.
+ * `locale` is left to the environment so the date reads naturally; only the
+ * zone is pinned.
+ */
+export function formatCalendarDate(iso: string, locale?: string): string {
+  return new Date(iso).toLocaleDateString(locale, { timeZone: "UTC" });
+}
+
+/**
  * Advance a subscription's nextBillingDate forward by its billing cycle until
  * the UTC day is >= today's UTC day. If the date is already today or in the
  * future, it is returned unchanged. Input and output are UTC ISO strings.
@@ -108,8 +140,8 @@ export function calculateMonthlyTotal(
 }
 
 /**
- * Return subscriptions whose nextBillingDate falls between today (local
- * midnight of `now`) and today + `days` days (inclusive), each augmented
+ * Return subscriptions whose nextBillingDate falls between today (midnight UTC
+ * of `now`) and today + `days` days (inclusive), each augmented
  * with `daysUntil: number` (0 = due today). Sorted ascending by daysUntil.
  * Past-due bills (before today's midnight) are excluded.
  */

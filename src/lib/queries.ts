@@ -1,7 +1,7 @@
 import type { BillingCycle } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { redis, subscriptionsKey, ttlWithJitter } from "@/lib/redis";
-import { calculateMonthlyTotal } from "@/lib/subscription-utils";
+import { calculateMonthlyTotal, isUsableDate } from "@/lib/subscription-utils";
 
 export type SerializedSubscription = {
   id: string;
@@ -15,7 +15,7 @@ export type SerializedSubscription = {
   category: string | null;
 };
 
-function serializeSubscription(sub: {
+type SubscriptionRow = {
   id: string;
   name: string;
   amount: unknown;  // Prisma Decimal
@@ -25,7 +25,12 @@ function serializeSubscription(sub: {
   startDate: Date;
   status: string;
   category: string | null;
-}): SerializedSubscription {
+};
+
+/** Date fields that must survive .toISOString() before a row can be used. */
+const DATE_FIELDS = ["nextBillingDate", "startDate"] as const;
+
+function serializeSubscription(sub: SubscriptionRow): SerializedSubscription {
   return {
     id: sub.id,
     name: sub.name,
@@ -37,6 +42,43 @@ function serializeSubscription(sub: {
     status: sub.status,
     category: sub.category,
   };
+}
+
+/**
+ * Serialize a batch of rows, dropping any the database handed back with an
+ * unusable date.
+ *
+ * The type says these are Dates, but the driver produces them by parsing a
+ * string and returns a NaN Date rather than throwing when that fails — so one
+ * malformed row would otherwise take the whole dashboard down on
+ * .toISOString(). Same principle as the Redis handling above: a broken
+ * dependency degrades the page, it does not remove it.
+ *
+ * Bad rows are skipped rather than shown with a placeholder date. A row with a
+ * made-up date would silently distort the monthly total and Upcoming Bills, and
+ * would read to the user as real data. Skipping is the honest failure. The row
+ * is still editable at /dashboard/[id]/edit, which renders the broken field
+ * empty so it can be re-entered.
+ */
+function serializeSubscriptions(
+  subs: SubscriptionRow[],
+): SerializedSubscription[] {
+  const serialized: SerializedSubscription[] = [];
+
+  for (const sub of subs) {
+    const broken = DATE_FIELDS.filter((field) => !isUsableDate(sub[field]));
+
+    if (broken.length > 0) {
+      console.error(
+        `Skipping subscription ${sub.id}: unreadable ${broken.join(", ")}`,
+      );
+      continue;
+    }
+
+    serialized.push(serializeSubscription(sub));
+  }
+
+  return serialized;
 }
 
 export async function getCachedSubscriptions(
@@ -69,7 +111,7 @@ export async function getCachedSubscriptions(
         where: { userId, status: "ACTIVE" },
         orderBy: { nextBillingDate: "asc" },
       });
-      const serialized = subscriptions.map(serializeSubscription);
+      const serialized = serializeSubscriptions(subscriptions);
 
       try {
         await redis.set(cacheKey, serialized, { ex: ttlWithJitter() });
@@ -104,7 +146,7 @@ export async function getCachedSubscriptions(
     where: { userId, status: "ACTIVE" },
     orderBy: { nextBillingDate: "asc" },
   });
-  return subscriptions.map(serializeSubscription);
+  return serializeSubscriptions(subscriptions);
 }
 
 export async function getCachedMonthlyTotal(

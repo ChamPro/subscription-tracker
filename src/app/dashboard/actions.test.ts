@@ -33,14 +33,25 @@ const updateMany = vi.mocked(prisma.subscription.updateMany);
 const deleteMany = vi.mocked(prisma.subscription.deleteMany);
 const invalidate = vi.mocked(invalidateUserCache);
 
-// Valid form payload; far-future nextBillingDate satisfies both schema refines.
+// A year out, computed rather than hard-coded: the schema rejects dates more
+// than 50 years ahead, so a fixed far-future date would eventually rot.
+const NEXT_YEAR = (() => {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
+  )
+    .toISOString()
+    .slice(0, 10);
+})();
+
+// Valid form payload; nextBillingDate satisfies both schema refines.
 function validForm() {
   const fd = new FormData();
   fd.set("name", "Netflix");
   fd.set("amount", "10");
   fd.set("currency", "USD");
   fd.set("billingCycle", "MONTHLY");
-  fd.set("nextBillingDate", "2099-01-01");
+  fd.set("nextBillingDate", NEXT_YEAR);
   fd.set("startDate", "2020-01-01");
   return fd;
 }
@@ -52,7 +63,7 @@ function invalidForm() {
   fd.set("amount", "-5");
   fd.set("currency", "USD");
   fd.set("billingCycle", "MONTHLY");
-  fd.set("nextBillingDate", "2099-01-01");
+  fd.set("nextBillingDate", NEXT_YEAR);
   fd.set("startDate", "2020-01-01");
   return fd;
 }

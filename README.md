@@ -1,5 +1,8 @@
 # subscription-tracker
 
+[![CI](https://github.com/ChamPro/subscription-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/ChamPro/subscription-tracker/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ChamPro/subscription-tracker/branch/main/graph/badge.svg)](https://codecov.io/gh/ChamPro/subscription-tracker)
+
 A subscription tracking app with authentication, CRUD, and Redis caching.
 
 **Live demo:** https://subscription-tracker-umber.vercel.app
