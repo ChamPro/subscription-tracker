@@ -1,13 +1,17 @@
 name: Keep-alive
 
-# Supabase pauses free-tier projects that see no database activity, which has
-# taken sign-in down more than once. /api/health runs a real `SELECT 1`, so
-# pinging it counts as activity. Note that /demo will not do — it serves
-# hardcoded data and never touches the database.
+# Two managed free-tier services idle out on independent clocks, so one ping has
+# to cover both:
+#   - Supabase pauses a project that sees no database activity, which has taken
+#     sign-in down more than once.
+#   - Upstash archives a Redis database that sees no commands.
+# /api/health probes each one directly — a real `SELECT 1` and a real Redis
+# write/read round-trip — so hitting it counts as activity on both. Note that
+# /demo will not do — it serves hardcoded data and touches neither service.
 on:
   schedule:
-    # Every 3 days at 07:00 UTC. Well inside Supabase's inactivity window,
-    # and cheap enough that drift in GitHub's cron scheduling does not matter.
+    # Every 3 days at 07:00 UTC. Well inside both inactivity windows, and cheap
+    # enough that drift in GitHub's cron scheduling does not matter.
     - cron: "0 7 */3 * *"
   # Allows a manual run from the Actions tab, e.g. right after restoring a
   # paused project.
@@ -33,7 +37,16 @@ jobs:
           # A 200 that is not {"status":"ok"} would mean the route responded
           # without reaching the database, so check the body too.
           if [ "$code" != "200" ] || ! grep -q '"status":"ok"' response.json; then
-            echo "::error::Health check failed (HTTP $code) — the database may be paused."
+            echo "::error::Postgres health check failed (HTTP $code) — the Supabase database may be paused."
+            exit 1
+          fi
+          # Checked separately from `status`, and reported with its own message,
+          # because the two failures mean different things. An unreachable cache
+          # is not an app outage — every call site degrades to a direct database
+          # read. It does mean this workflow has stopped keeping Upstash awake,
+          # which is the entire reason the probe exists, so it still fails here.
+          if ! grep -q '"cache":"ok"' response.json; then
+            echo "::error::Redis probe failed — the Upstash database may be idle or archived. The app still works (the cache layer degrades to direct database reads), but it is no longer being kept alive."
             exit 1
           fi
         env:
