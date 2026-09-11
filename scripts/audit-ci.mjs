@@ -39,10 +39,28 @@ const ALLOWED = {
       "read prisma.config.ts at build time. It is not in the deployed bundle: no " +
       "traced file in .next/server references prisma or deepmerge-ts, and nothing " +
       "in src/ imports the CLI. The only fix npm offers is prisma@6.12.0, a major " +
-      "downgrade. prisma 7.9.1 is current and still pins deepmerge-ts 7.x.",
+      "downgrade. prisma 7.10.0 is current and still pins deepmerge-ts 7.x.",
     removeWhen:
       "prisma ships a release depending on deepmerge-ts >= 8. Check with " +
       "`npm ls deepmerge-ts` after a prisma upgrade, then delete this entry.",
+  },
+  "GHSA-3f6p-5ww8-9rcr": {
+    package: "mysql2@3.15.3",
+    reason:
+      "Auth plugin downgrade to mysql_clear_password can leak plaintext " +
+      "credentials to a hostile MySQL server. This app never speaks MySQL: " +
+      "schema.prisma declares `provider = \"postgresql\"`, and mysql2 is one of " +
+      "the drivers the Prisma CLI bundles for other databases. It arrives only " +
+      "via prisma (a devDependency) and is not in the deployed bundle: nothing " +
+      "in src/ references mysql2 and no traced file in .next/server does " +
+      "either. It survives `--omit=dev` only through the peerOptional " +
+      "@prisma/client -> prisma edge documented at the top of this file, not " +
+      "because anything in production can reach it. The only fix npm offers is " +
+      "prisma@6.19.3, a major downgrade.",
+    removeWhen:
+      "prisma ships a release bundling mysql2 >= 3.22.0 (the advisory's fixed " +
+      "version). Check with `npm ls mysql2` after a prisma upgrade, then " +
+      "delete this entry.",
   },
 };
 
