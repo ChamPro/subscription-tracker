@@ -24,30 +24,50 @@ jobs:
       - name: Ping health endpoint
         run: |
           echo "Pinging $URL"
-          # --retry covers a cold start: the first request after a quiet spell
-          # can be slow enough to time out while the database wakes up.
-          code=$(curl --silent --show-error --location \
-                      --retry 3 --retry-delay 20 --retry-all-errors \
-                      --max-time 60 \
-                      --output response.json --write-out '%{http_code}' \
-                      "$URL")
-          echo "HTTP $code"
-          cat response.json || true
-          echo
-          # A 200 that is not {"status":"ok"} would mean the route responded
-          # without reaching the database, so check the body too.
+          # Two layers of retry, for two different failures:
+          #   - curl --retry covers the transport: a cold start after a quiet
+          #     spell can be slow enough to time out while the database wakes.
+          #   - The outer loop covers the body. The route answers 200 with
+          #     "cache":"unreachable" when one Redis round-trip fails, and that
+          #     has happened twice on a single sample (2026-09-10, 2026-09-28)
+          #     while the very next request succeeded. One blip must not be
+          #     reported as an archived database, so a verdict needs
+          #     $ATTEMPTS consecutive failures, $PAUSE seconds apart.
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            # Never judge a stale body: a transport failure leaves no file.
+            rm -f response.json
+            code=$(curl --silent --show-error --location \
+                        --retry 3 --retry-delay 20 --retry-all-errors \
+                        --max-time 60 \
+                        --output response.json --write-out '%{http_code}' \
+                        "$URL") || code=000
+            # Truncated: a 404 or 5xx body is a whole HTML page.
+            echo "Attempt $attempt/$ATTEMPTS: HTTP $code $(head -c 200 response.json 2>/dev/null || true)"
+            # A 200 that is not {"status":"ok"} would mean the route responded
+            # without reaching the database, so check the body too.
+            if [ "$code" = "200" ] \
+               && grep -q '"status":"ok"' response.json \
+               && grep -q '"cache":"ok"' response.json; then
+              echo "Both services answered."
+              exit 0
+            fi
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then
+              sleep "$PAUSE"
+            fi
+          done
+          # Every attempt failed. Diagnose from the last response, and report
+          # the two failures separately because they mean different things.
           if [ "$code" != "200" ] || ! grep -q '"status":"ok"' response.json; then
-            echo "::error::Postgres health check failed (HTTP $code) — the Supabase database may be paused."
+            echo "::error::Postgres health check failed $ATTEMPTS times (last: HTTP $code) — the Supabase database may be paused."
             exit 1
           fi
-          # Checked separately from `status`, and reported with its own message,
-          # because the two failures mean different things. An unreachable cache
-          # is not an app outage — every call site degrades to a direct database
-          # read. It does mean this workflow has stopped keeping Upstash awake,
-          # which is the entire reason the probe exists, so it still fails here.
-          if ! grep -q '"cache":"ok"' response.json; then
-            echo "::error::Redis probe failed — the Upstash database may be idle or archived. The app still works (the cache layer degrades to direct database reads), but it is no longer being kept alive."
-            exit 1
-          fi
+          # An unreachable cache is not an app outage — every call site degrades
+          # to a direct database read. It does mean this workflow has stopped
+          # keeping Upstash awake, which is the entire reason the probe exists,
+          # so it still fails here.
+          echo "::error::Redis probe failed $ATTEMPTS times — the Upstash database may be idle or archived. The app still works (the cache layer degrades to direct database reads), but it is no longer being kept alive."
+          exit 1
         env:
           URL: https://subscription-tracker-umber.vercel.app/api/health
+          ATTEMPTS: 3
+          PAUSE: 20
