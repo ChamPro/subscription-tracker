@@ -62,6 +62,23 @@ const ALLOWED = {
       "version). Check with `npm ls mysql2` after a prisma upgrade, then " +
       "delete this entry.",
   },
+  "GHSA-vfj7-8cjw-p6xm": {
+    package: "braces@3.0.3",
+    reason:
+      "Stack exhaustion on deeply nested brace patterns. Reached only via " +
+      "eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> " +
+      "micromatch -> braces, i.e. the lint rule set, which runs on our own " +
+      "source files at lint time and never in production: nothing in src/ " +
+      "imports braces, micromatch or fast-glob, and no traced file in " +
+      ".next/server references them. There is no fixed release at all — " +
+      "3.0.3 is the latest braces and the advisory covers <= 3.0.3 — so the " +
+      "only option npm offers is eslint-config-next@14, a major downgrade.",
+    removeWhen:
+      "braces publishes a release above 3.0.3 that the advisory lists as " +
+      "fixed, and `npm ls braces` resolves to it (micromatch pins ^3.0.3, " +
+      "so a plain `npm update braces` should pick it up). Then delete this " +
+      "entry.",
+  },
 };
 
 const BLOCKING = new Set(["high", "critical"]);

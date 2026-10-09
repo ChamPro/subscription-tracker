@@ -2,17 +2,23 @@ name: Keep-alive
 
 # Two managed free-tier services idle out on independent clocks, so one ping has
 # to cover both:
-#   - Supabase pauses a project that sees no database activity, which has taken
-#     sign-in down more than once.
+#   - Supabase pauses a project that sees too little database activity — the
+#     bar is "a few user requests to the database each day over the previous
+#     week", not merely "any activity in 7 days". It has taken sign-in down
+#     more than once.
 #   - Upstash archives a Redis database that sees no commands.
 # /api/health probes each one directly — a real `SELECT 1` and a real Redis
 # write/read round-trip — so hitting it counts as activity on both. Note that
 # /demo will not do — it serves hardcoded data and touches neither service.
 on:
   schedule:
-    # Every 3 days at 07:00 UTC. Well inside both inactivity windows, and cheap
-    # enough that drift in GitHub's cron scheduling does not matter.
-    - cron: "0 7 */3 * *"
+    # Every 6 hours. Every 3 days was not enough: the project was paused on
+    # 2026-10-08 with three green runs in the preceding week, because one
+    # SELECT 1 every third day is "insufficient" by Supabase's definition
+    # (docs/guides/platform/free-project-pausing). Four a day clears the
+    # "a few each day" bar with margin, and Upstash only needs any traffic.
+    # Each run is a few seconds and the repo is public, so this costs nothing.
+    - cron: "0 */6 * * *"
   # Allows a manual run from the Actions tab, e.g. right after restoring a
   # paused project.
   workflow_dispatch:
